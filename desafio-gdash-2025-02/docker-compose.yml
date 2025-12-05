@@ -1,0 +1,80 @@
+version: '3.8'
+services:
+  mongo:
+    image: mongo:6.0
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    ports:
+      - "27017:27017"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - MONGO_URI=mongodb://root:example@mongo:27017/weather?authSource=admin
+      - JWT_SECRET=${JWT_SECRET}
+      - DEFAULT_ADMIN_EMAIL=${DEFAULT_ADMIN_EMAIL}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - WORKER_API_TOKEN=${WORKER_API_TOKEN}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongo
+
+  collector:
+    build:
+      context: ./collector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - LATITUDE=${LATITUDE:--23.55}
+      - LONGITUDE=${LONGITUDE:--46.63}
+      - INTERVAL_SECONDS=${COLLECT_INTERVAL_SECONDS:-300}
+    depends_on:
+      - rabbitmq
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - API_ENDPOINT=http://api:3000/api/weather
+      - API_TOKEN=${WORKER_API_TOKEN:-worker-secret-token}
+    depends_on:
+      - rabbitmq
+      - api
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=http://api:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  mongo_data:
